@@ -23,45 +23,36 @@ const char *argp_program_bug_address = "<horkay.matyas@gmail.com>";
 
 static char doc[] = "A small ping CLI application to send ICMP echo requests in a loop";
 
-static char args_doc[] = "-h TARGET_HOSTNAME\n-i TARGET_IP";
+
+static char args_doc[] = "TARGET";
 
 static struct argp_option options[] = {
-    {"target_host", 'h', "HOSTNAME", 0, "Specify target by HOSTNAME."},
-    {"target_ip",   'i', "IP",       0, "Specify target by IP."},
-    {"ttl",         't', "TTL",      0, "Specify TTL (default=64, max=255)."},
+    {"target", 0,   "TARGET", 0, "Specify TARGET host by IP or HOSTNAME"},
+    {"ttl",    't', "TTL",    0, "Specify TTL (default=64, max=255)."},
     {0}
 };
 
 struct arguments {
-    char *target_hostname;
-    char *target_ip;
+    char *target;
     uint8_t ttl;
 };
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 
   struct arguments *arguments = state->input;
+  bool target_specified = strcmp(arguments->target, "");
 
-  // Only allow user to specify one or the other.
-  bool hostname_specified = strcmp(arguments->target_hostname, "");
-  bool ip_specified = strcmp(arguments->target_ip, "");
   switch (key) {
-    case 'h':
-      if (ip_specified) {
-        printf("Please only specify either the HOSTNAME or IP\n");
-        argp_usage(state);
-      }
-      arguments->target_hostname = arg;
-      break;
 
-    case 'i':
-      if (hostname_specified) {
-        printf("Please only specify either the HOSTNAME or IP\n");
+    case ARGP_KEY_ARG:
+      if (state->arg_num != 0) {
+        // If here too many arguments passed in for TARGET
         argp_usage(state);
+        break;
       }
-      arguments->target_ip = arg;
-      break;
 
+      arguments->target = arg;
+      break;
     case 't': {
 
       // Check if ttl value specified is greater than TTL_MAX set to TTL_DEFAULT.
@@ -73,7 +64,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
     case ARGP_KEY_END:
 
       // If all arguments parsed and neither hostname or ip specified, stop execution and display help message.
-      if (!(hostname_specified || ip_specified)) {
+      if (!target_specified) {
         argp_usage(state);
         return ARGP_ERR_UNKNOWN;
       }
@@ -91,10 +82,11 @@ static struct argp argp = {options, parse_opt, args_doc, doc};
 // ARG PARSE END
 
 // PING SEND BEGIN
+
+
 bool loop = true;
 
-void
-send_ping(int socket_fd, struct sockaddr_in *host_address, char *hostname, char *host_ip, int ttl) {
+void send_ping(int socket_fd, struct sockaddr_in *host_address, char *hostname, char *host_ip, int ttl) {
 
   //TODO: PARSE TTL
   int total_sent = 0, total_received = 0;
@@ -104,6 +96,7 @@ send_ping(int socket_fd, struct sockaddr_in *host_address, char *hostname, char 
   struct timespec time_start, time_end, tfs, tfe;
 
 
+  //TODO THIS IS RANDOM AF.
   struct timeval tv_out;
   tv_out.tv_sec = 1;
   tv_out.tv_usec = 0;
@@ -114,8 +107,6 @@ send_ping(int socket_fd, struct sockaddr_in *host_address, char *hostname, char 
     printf("Error! Failed to set ttl to %d.\n", ttl);
     exit(EXIT_FAILURE);
   }
-
-  //TODO RCVTIMEO ??
 
   setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, (const char *) &tv_out, sizeof(tv_out));
 
@@ -185,43 +176,45 @@ void intHandler(int dummy) {
   loop = false;
 }
 
-// PING SEND END
-
-// MAIN
+// Function return true iff target is a valid string representation of an IPv4 address.
+bool is_ip(char *target) {
+  struct in_addr in_addr;
+  return inet_aton(target, &in_addr) != 0;
+}
 
 int main(int argc, char **argv) {
 
   // Set up arguments struct and parse command line arguments.
   struct arguments arguments;
-  arguments.target_hostname = "";
-  arguments.target_ip = "";
+    arguments.target = "";
   arguments.ttl = TTL_DEFAULT;
   argp_parse(&argp, argc, argv, 0, 0, &arguments);
 
-  char *hostname = arguments.target_hostname;
-  char *ip = arguments.target_ip;
-  uint8_t ttl = arguments.ttl;
-
+  char *target = arguments.target;
+  char *ip;
+  char *hostname;
   struct sockaddr_in addr;
-  // If hostname was specified by user, perform dns lookup to obtain host ip and set up addr.
-  bool hostname_specified = strcmp(hostname, "");
-  if (hostname_specified) {
 
+  // Target specified is either an ip address or a hostname.
+  printf("Target is %s\n", target);
+  if (is_ip(target)) {
+    printf("Target is %s\n", target);
+    ip = target;
+    if ((hostname = reverse_dns_lookup(ip)) == NULL) {
+      printf("Error! Reverse DNS lookup for ip %s failed!\n", ip);
+      exit(EXIT_FAILURE);
+    }
+  } else {
+    hostname = target;
     if ((ip = dns_lookup(hostname, &addr)) == NULL) {
       printf("Error! DNS lookup for hostname %s failed!\n", hostname);
       exit(EXIT_FAILURE);
     }
-
   }
 
-  // Perform reverse dns lookup on IP to obtain "real" hostname of host.
-  char *reverse_hostname;
-  if ((reverse_hostname = reverse_dns_lookup(ip)) == NULL) {
-    printf("Error! Reverse DNS lookup for ip %s failed!\n", ip);
-    exit(EXIT_FAILURE);
-  }
+  uint8_t ttl = arguments.ttl;
 
-  printf("Attempting to connect to host: %s ip: %s\n", hostname_specified ? hostname : reverse_hostname, ip);
+  printf("Attempting to connect to host: %s ip: %s\n", hostname, ip);
 
   int socket_fd;
   if ((socket_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) < 0) {
@@ -231,44 +224,10 @@ int main(int argc, char **argv) {
 
   signal(SIGINT, intHandler);
 
-  send_ping(socket_fd, &addr, reverse_hostname, ip, ttl);
+  send_ping(socket_fd, &addr, hostname, ip, ttl);
 
   exit(EXIT_SUCCESS);
-//
-//
-//  int sockfd;
-//  char *ip_addr, *reverse_hostname;
-//  struct sockaddr_in addr;
-////  int addrlen = sizeof(addr);
-////  char net_buf[NI_MAXHOST];
-//
-//  ip_addr = dns_lookup(arguments.target_hostname, &addr);
-//  if (ip_addr == NULL) {
-//    printf("DNS lookup failed!\n");
-//    return 0;
-//  }
-//
-//  reverse_hostname = reverse_dns_lookup(ip_addr);
-//  printf("\nTrying to connect to '%s' IP: %s\n", arguments.target_hostname, ip_addr);
-//  printf("\nIP in addr struct is: %s\n", inet_ntoa(addr.sin_addr));
-//  printf("\nReverse Lookup domain: %s", reverse_hostname);
-//
-//  sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-//  if (sockfd < 0) {
-//    printf("\nSocket file descriptor not received!!\n");
-//    return 0;
-//  } else {
-//    printf("\nSocket file descriptor %d received\n", sockfd);
-//  }
-//  signal(SIGINT, intHandler);
-//
-//  printf("REVERSE HOSTNAME IS: %s\n", reverse_hostname);
-//
-//  send_ping(sockfd, &addr, reverse_hostname, ip_addr, arguments.target_hostname);
-//
-//  return 0;
-//
-//  exit(0);
 
 }
+
 
