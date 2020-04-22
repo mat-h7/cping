@@ -86,21 +86,31 @@ static struct argp argp = {options, parse_opt, args_doc, doc};
 
 bool loop = true;
 
+void init_ping_packet(struct icmp_packet *packet, int sequence) {
+
+  bzero(packet, sizeof(struct icmp_packet));
+  memset(packet, 0, sizeof(struct icmp_packet));
+  packet->header.type = ICMP_ECHO;
+  packet->header.un.echo.id = getpid();
+  packet->header.un.echo.sequence = sequence;
+  packet->header.checksum = ~checksum(&packet, sizeof(packet));
+
+}
+
 void send_ping(int socket_fd, struct sockaddr_in *host_address, char *hostname, char *host_ip, int ttl) {
 
-  //TODO: PARSE TTL
-  int total_sent = 0, total_received = 0;
-  struct icmp_packet packet;
-  struct sockaddr_in receive_addr;
-  long double rtt = 0, total_time = 0;
-  struct timespec time_start, time_end, tfs, tfe;
 
+  int total_sent = 0, total_received = 0;
+  long double rtt = 0, total_time = 0;
+  struct timespec intial_time, final_time, loop_start, loop_end;
+  struct icmp ipacket;
+//  struct icmp buffer;
 
   //TODO THIS IS RANDOM AF.
   struct timeval tv_out;
   tv_out.tv_sec = 1;
   tv_out.tv_usec = 0;
-  clock_gettime(CLOCK_MONOTONIC, &tfs);
+  clock_gettime(CLOCK_MONOTONIC, &loop_start);
 
 
   if (setsockopt(socket_fd, SOL_IP, IP_TTL, &ttl, sizeof(ttl))) {
@@ -112,59 +122,56 @@ void send_ping(int socket_fd, struct sockaddr_in *host_address, char *hostname, 
 
   while (loop) {
 
-    bool packet_sent = true;
-    bzero(&packet, sizeof(packet));
+    sleep(1);
 
-    int i;
-    for (i = 0; i < sizeof(packet.data) - 1; i++) {
-      packet.data[i] = i + '0';
-    }
+    // Set up ping packet.
+    bzero(&ipacket, sizeof(ipacket));
+    ipacket.icmp_type = ICMP_ECHO;
+    ipacket.icmp_id = getpid();
+    ipacket.icmp_seq = total_sent++;
+    ipacket.icmp_cksum = ~checksum(&ipacket, sizeof(struct icmp));
 
-    packet.data[i] = 0;
+    clock_gettime(CLOCK_MONOTONIC, &intial_time);
 
+    char recv_buf[sizeof(struct ip) + sizeof(struct icmp)];
 
-    packet.header.type = ICMP_ECHO;
-    packet.header.un.echo.id = getpid();
-    packet.header.un.echo.sequence = total_sent++;
-    packet.header.checksum = ~checksum(&packet, sizeof(packet));
-
-    usleep(5);
-
-    clock_gettime(CLOCK_MONOTONIC, &time_start);
-
-
-    if (sendto(socket_fd, &packet, sizeof(packet), 0, (struct sockaddr *) host_address, sizeof(*host_address)) <= 0) {
+    if (sendto(socket_fd, &ipacket, sizeof(ipacket), 0, (struct sockaddr *) host_address, sizeof(*host_address)) <= 0) {
       printf("Failed to send packet!\n");
-      packet_sent = false;
+      continue;
     }
-
-    socklen_t receive_addr_len = (sizeof(receive_addr));
-    if (recvfrom(socket_fd, &packet, sizeof(packet), 0, (struct sockaddr *) &receive_addr, &receive_addr_len) <= 0) {
+    ssize_t bytes_received;
+    if ((bytes_received = recv(socket_fd, &recv_buf, sizeof(recv_buf), 0)) < 0) {
       printf("Failed to receive response!\n");
     } else {
-      clock_gettime(CLOCK_MONOTONIC, &time_end);
-      double time_elapsed = ((double) (time_end.tv_nsec - time_start.tv_nsec)) / 1000000.0;
-      rtt = (double) (time_end.tv_sec - time_start.tv_sec) * 1000.0 + time_elapsed;
 
-      if (packet_sent) {
+      struct icmp *icmp = (struct icmp *) (recv_buf + sizeof(struct ip));
+      printf("\n\n type: %d, code: %d\n\n", icmp->icmp_type, icmp->icmp_code);
+      clock_gettime(CLOCK_MONOTONIC, &final_time);
+      double time_elapsed = ((double) (final_time.tv_nsec - intial_time.tv_nsec)) / 1000000.0;
+      rtt = (double) (final_time.tv_sec - intial_time.tv_sec) * 1000.0 + time_elapsed;
 
-        if (!(packet.header.type == 69 && packet.header.code == 0)) {
-          printf("Error. Packet received with ICMP type: %d, code: %d", packet.header.type, packet.header.code);
-        } else {
-
-          printf("%d bytes from %s (%s) msg_seq=%d ttl=%d rtt = %Lf ms.\n", 64, hostname,
-                 host_ip,
-                 total_sent, ttl, rtt);
-          total_received++;
-        }
+      if (icmp->icmp_code != 0) {
+        printf("Error. Packet received with ICMP type: %d, code: %d", icmp->icmp_type, icmp->icmp_code);
+        continue;
       }
+
+      // If here response successfully received.
+      printf("%ld bytes from %s (%s) icmp_seq=%d:", bytes_received, hostname, host_ip, total_sent);
+      if (icmp->icmp_type == 11) {
+        // If here TTL exceeded.
+        printf("Time to live exceeded\n");
+        continue;
+      }
+
+      printf("ttl=%d rtt = %Lf ms.\n", ttl, rtt);
+      total_received++;
 
     }
   }
 
-  clock_gettime(CLOCK_MONOTONIC, &tfe);
-  double time_elapsed = ((double) (tfe.tv_nsec - tfs.tv_nsec)) / 1000000.0;
-  total_time = (tfe.tv_sec - tfs.tv_sec) * 1000.0 + time_elapsed;
+  clock_gettime(CLOCK_MONOTONIC, &loop_end);
+  double time_elapsed = ((double) (loop_end.tv_nsec - loop_start.tv_nsec)) / 1000000.0;
+  total_time = (loop_end.tv_sec - loop_start.tv_sec) * 1000.0 + time_elapsed;
 
   printf("%d packets sent, %d packets received, %f percent packet loss. Total time: %Lf ms.\n\n", total_sent,
          total_received, ((double) (total_sent - total_received) / total_sent) * 100.0, total_time);
@@ -177,31 +184,41 @@ void intHandler(int dummy) {
 }
 
 // Function return true iff target is a valid string representation of an IPv4 address.
-bool is_ip(char *target) {
+bool is_ip4(char *target) {
   struct in_addr in_addr;
   return inet_aton(target, &in_addr) != 0;
+}
+
+// Function return true iff target is a valid string representation of an IPv6 address.
+bool is_ip6(char *target) {
+  struct in6_addr in_addr;
+  return inet_pton(AF_INET6, target, (void *)&in_addr) == 1;
 }
 
 int main(int argc, char **argv) {
 
   // Set up arguments struct and parse command line arguments.
   struct arguments arguments;
-    arguments.target = "";
+  arguments.target = "";
   arguments.ttl = TTL_DEFAULT;
   argp_parse(&argp, argc, argv, 0, 0, &arguments);
 
   char *target = arguments.target;
-  char *ip;
-  char *hostname;
+  char *ip = NULL;
+  char *hostname = NULL;
   struct sockaddr_in addr;
 
   // Target specified is either an ip address or a hostname.
-  printf("Target is %s\n", target);
-  if (is_ip(target)) {
-    printf("Target is %s\n", target);
+  if (is_ip6(target)) {
     ip = target;
-    if ((hostname = reverse_dns_lookup(ip)) == NULL) {
+  } else if (is_ip4(target)) {
+    ip = target;
+    if ((hostname = reverse_dns_lookup(AF_INET, ip)) == NULL) {
       printf("Error! Reverse DNS lookup for ip %s failed!\n", ip);
+      exit(EXIT_FAILURE);
+    }
+    if ((ip = dns_lookup(hostname, &addr)) == NULL) {
+      printf("Error! DNS lookup for hostname %s failed!\n", hostname);
       exit(EXIT_FAILURE);
     }
   } else {

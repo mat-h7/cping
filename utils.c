@@ -1,5 +1,6 @@
 #include <netdb.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <arpa/inet.h>
 #include <string.h>
 #include "utils.h"
@@ -50,31 +51,36 @@ char *dns_lookup(char *hostname, struct sockaddr_in *addr) {
 }
 
 //TODO: CHECKING AFTER MALLOC
-char *reverse_dns_lookup(char *ip) {
+char *reverse_dns_lookup(int af, char *ip) {
 
-  struct in_addr in_addr;
 
-  // Convert from IPv4 string representation into binary.
-  if ((inet_aton(ip, &in_addr)) == 0) {
-    return NULL;
+  if (af == AF_INET) {
+    struct in_addr in_addr;
+
+    // Convert from IPv4 string representation into binary.
+    if ((inet_aton(ip, &in_addr)) == 0) {
+      return NULL;
+    }
+
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_addr = in_addr;
+    addr.sin_port = 0;
+
+    char buffer[NI_MAXHOST];
+
+    if ((getnameinfo((struct sockaddr *) &addr, sizeof(addr), buffer, sizeof(buffer), NULL, 0, NI_NAMEREQD))) {
+      // If here reverse lookup of ip was unsuccessful.
+      return NULL;
+    }
+
+    char *result = malloc((strlen(buffer) + 1));
+    strcpy(result, buffer);
+    return result;
+  } else {
+
   }
-
-  struct sockaddr_in addr;
-  addr.sin_family = AF_INET;
-  addr.sin_addr = in_addr;
-  addr.sin_port = 0;
-
-  char buffer[NI_MAXHOST];
-
-  if ((getnameinfo((struct sockaddr *) &addr, sizeof(addr), buffer, sizeof(buffer), NULL, 0, NI_NAMEREQD))) {
-    // If here reverse lookup of ip was unsuccessful.
-    return NULL;
-  }
-
-  char *result = malloc((strlen(buffer) + 1));
-  strcpy(result, buffer);
-  return result;
-
+  return NULL;
 
 }
 
