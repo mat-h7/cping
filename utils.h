@@ -3,7 +3,6 @@
 //
 
 #include <netinet/ip_icmp.h>
-#include "global.h"
 
 #ifndef CPING_UTILS_H
 #define CPING_UTILS_H
