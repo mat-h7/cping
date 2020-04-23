@@ -20,7 +20,7 @@ to the ping packets when testing locally.
 
 For more information on how parametrs can be specified run: ./cping --help
  
-### Utils.c
+## Utils
 Contains a few helper functions that I created during development of this project, namely:
 * checksum
 * dns_lookup4
@@ -30,6 +30,7 @@ Contains a few helper functions that I created during development of this projec
 
 (**note**: not all of these are used in the submitted implementation I simply left them here for completeness)
 
-These functions do not depend on the implementation of cping and can be used by other projects. For more information see utils.h
+These functions do not depend on the implementation of cping and can be used by other projects.  
+For more information see utils.h
 ## Author
 Matyas Horkay <horkay.matyas@gmail.com>
