@@ -13,7 +13,6 @@
 #include <signal.h>
 #include <argp.h>
 #include <stdbool.h>
-#include "global.h"
 #include "utils.h"
 
 //
