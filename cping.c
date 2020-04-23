@@ -102,8 +102,14 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 
 static struct argp argp = {options, parse_opt, args_doc, doc};
 
-// If true (and count != 0) keep looping until SIGINT (or count decreases to 0).
+
+// Variable and custom interrupt handler for ping loop.
 static bool ping = true;
+
+void int_handler(int unused) {
+  ping = false;
+}
+
 
 // Function sends ICMP echo ping requests to host_ip (IPv4/IPv6) with ttl=ttl, interval=interval, count=count.
 void ping_loop(int socket_fd, struct sockaddr host_address, char *host_ip, int ttl, int interval, int count) {
@@ -148,16 +154,15 @@ void ping_loop(int socket_fd, struct sockaddr host_address, char *host_ip, int t
     ping_packet.icmp_cksum = ~checksum(&ping_packet, sizeof(struct icmp));
 
     clock_gettime(CLOCK_MONOTONIC, &initial);
+
     if (sendto(socket_fd, &ping_packet, sizeof(struct icmp), 0, &host_address, addr_length) <= 0) {
       printf("Failed to send packet!\n");
-      count--;
-      continue;
+      goto loop_end;
     }
 
     if ((bytes_received = recv(socket_fd, &recv_buf, sizeof(recv_buf), 0)) < 0) {
       printf("Failed to receive response!\n");
-      count--;
-      continue;
+      goto loop_end;
     }
 
     struct icmp *recv_packet = (struct icmp *) (recv_buf + sizeof(struct ip));
@@ -170,25 +175,35 @@ void ping_loop(int socket_fd, struct sockaddr host_address, char *host_ip, int t
     max_rtt = rtt > max_rtt ? rtt : max_rtt;
     total_rtt += rtt;
 
+    // Report if packet unable to reach destination.
+    if (recv_packet->icmp_code == ICMP_DEST_UNREACH) {
+      printf("Error. Destination not reached.\n");
+      goto loop_end;
+    }
+
+    // Report any other errors (note: these should be unlikely in this context).
     if (recv_packet->icmp_code != ICMP_CODE_ECHOREP) {
       printf("Error. Packet received with ICMP type: %d, code: %d", recv_packet->icmp_type, recv_packet->icmp_code);
-      count--;
-      continue;
+      goto loop_end;
+
     }
 
-    // If here response successfully received.
+    // If here response received.
     printf("%ld bytes from %s icmp_seq=%d: ", bytes_received, host_ip, total_sent);
+
     if (recv_packet->icmp_type == ICMP_TYPE_EXCTTL) {
-      // If here TTL exceeded.
+      // If here TTL for packet exceeded.
       printf("Time to live exceeded\n");
-      count--;
-      continue;
+      goto loop_end;
     }
 
+    // If here packet was received correctly.
     printf("ttl=%d rtt = %.2Lf ms.\n", ttl, rtt);
-    count--;
     total_received++;
 
+    // Label to jump to if any error occurs.
+    loop_end:
+      count--;
   }
 
   clock_gettime(CLOCK_MONOTONIC, &loop_final);
@@ -198,12 +213,8 @@ void ping_loop(int socket_fd, struct sockaddr host_address, char *host_ip, int t
          total_received, ((double) (total_sent - total_received) / total_sent) * 100.0, total_time);
   printf("rtt min/avg/max = %.3Lf/%.3Lf/%.3Lf ms\n", min_rtt, total_rtt / (double) total_sent, max_rtt);
 
-}
 
-void intHandler(int unused) {
-  ping = false;
 }
-
 
 int main(int argc, char **argv) {
 
@@ -215,6 +226,7 @@ int main(int argc, char **argv) {
   arguments.count = INVALID;
   argp_parse(&argp, argc, argv, 0, 0, &arguments);
 
+  // Declare variables used to set up input to ping_loop.
   int ttl = arguments.ttl;
   int interval = arguments.interval;
   int count = arguments.count;
@@ -229,18 +241,21 @@ int main(int argc, char **argv) {
   bzero(&addr, sizeof(addr));
 
   if (!ipv6) {
+
+    // If here target is hostname or ipv4 addresss. Set up addr struct accordingly.
     if ((ip = dns_lookup4(target, (struct sockaddr_in *) &addr)) == NULL) {
-      printf("Error! DNS lookup for hostname %s failed!\n", hostname);
+      printf("Error! DNS lookup for %s failed!\n", hostname);
       exit(EXIT_FAILURE);
     }
+
   } else {
     
-    // If here target specified is an ipv6 address, set up addr struct accordingly.
+    // If here target specified is an ipv6 address. Set up addr struct accordingly.
     ip = target;
-    struct sockaddr_in6 *in_addr = (struct sockaddr_in6 *) &addr;
-    in_addr->sin6_family = AF_INET6;
-    in_addr->sin6_port = 0;
-    inet_pton(AF_INET6, target, &in_addr->sin6_addr);
+    if(ipv6_to_addr(target, (struct sockaddr_in6*)&addr)) {
+      printf("Error! %s is not a valid ip address.", target);
+      exit(EXIT_FAILURE);
+    }
 
   }
 
@@ -248,23 +263,22 @@ int main(int argc, char **argv) {
   int socket_fd;
   int af = ipv6 ? AF_INET6 : AF_INET;
   int protocol = ipv6 ? IPPROTO_ICMPV6 : IPPROTO_ICMP;
-
   if ((socket_fd = socket(af, SOCK_RAW, protocol)) < 0) {
     printf("Error! Failed to create socket, make sure you are running the program as root!\n");
     exit(EXIT_FAILURE);
   }
 
-  // Set socket RCVTIMEO to 2 second.
+  // Set socket receive timeout to 2 seconds.
   struct timeval rcvtimeo;
   bzero(&rcvtimeo, sizeof(struct timeval));
-  rcvtimeo.tv_sec = 2;
+  rcvtimeo.tv_sec = DEFAULT_RCVTIMEO;
   if(setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, (const char *) &rcvtimeo, sizeof(rcvtimeo))) {
     printf("Error! Failed to set RCVTIMEO.\n");
     exit(EXIT_FAILURE);
   }
 
   // Create custom SIGINT handler, so ping statistics can be display when loop is broken.
-  signal(SIGINT, intHandler);
+  signal(SIGINT, int_handler);
 
   printf("\nPinging %s (%s)\n\n", ip, target);
   ping_loop(socket_fd, addr, ip, ttl, interval, count);
@@ -272,5 +286,3 @@ int main(int argc, char **argv) {
   exit(EXIT_SUCCESS);
 
 }
-
-

@@ -51,7 +51,7 @@ char *dns_lookup4(char *hostname, struct sockaddr_in *addr) {
   }
 
   addr->sin_family = host->h_addrtype;
-  addr->sin_addr = *(struct in_addr *)host->h_addr;
+  addr->sin_addr = *(struct in_addr *) host->h_addr;
   addr->sin_port = 0;
 
   char *ip_addr = malloc(IPV4_SIZE);
@@ -86,5 +86,14 @@ char *reverse_dns_lookup4(char *ip) {
   strcpy(result, buffer);
   return result;
 
+}
+
+int ipv6_to_addr(char *target, struct sockaddr_in6 *addr) {
+
+  addr->sin6_family = AF_INET6;
+  addr->sin6_port = 0;
+
+  // note: inet_pton returns 1 iff conversion successful.
+  return inet_pton(AF_INET6, target, &addr->sin6_addr) != 1;
 }
 

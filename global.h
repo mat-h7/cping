@@ -15,6 +15,8 @@
 
 #define SECTOMILLI 1000.0
 #define NANOTOMILLI 1000000.0
+#define DEFAULT_RCVTIMEO 2
+
 
 // This is the minimum size for the data segment of an ethernet frame.
 #define ICMP_PACKET_SIZE 64

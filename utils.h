@@ -26,5 +26,8 @@ char *dns_lookup4(char *hostname, struct sockaddr_in *addr);
 // Function performs dns reverse lookup of IPv4 address. Returns NULL on failure.
 char *reverse_dns_lookup4(char *ip);
 
+// Function turns target (IPv6 address) into the corresponding sockaddr struct. Returns 0 iff successful.
+int ipv6_to_addr(char *target, struct sockaddr_in6* addr);
+
 
 #endif //CPING_UTILS_H
