@@ -14,13 +14,13 @@ The following parameters can be specified:
 *Note that support for IPV6 is limited, as I could not manage to receive any responses 
 to the ping packets when testing locally.
 
-##Usage
+## Usage
 1. make cping
 2. sudo ./cping www.example.com
 
 For more information on how parametrs can be specified run: ./cping --help
  
-###Utils.c
+### Utils.c
 Contains a few helper functions that I created during development of this project, namely:
 * checksum
 * dns_lookup4
@@ -31,5 +31,5 @@ Contains a few helper functions that I created during development of this projec
 (**note**: not all of these are used in the submitted implementation I simply left them here for completeness)
 
 These functions do not depend on the implementation of cping and can be used by other projects. For more information see utils.h
-##Author
+## Author
 Matyas Horkay <horkay.matyas@gmail.com>
