@@ -8,21 +8,23 @@
 #ifndef CPING_UTILS_H
 #define CPING_UTILS_H
 
-struct icmp_packet {
-    struct icmphdr header;
-    char data[ICMP_PACKET_SIZE - sizeof(struct icmphdr)];
-};
-
 // Function to perform checksum on buffer of size bytes.
 uint16_t checksum(void *buffer, int bytes);
 
-// Function to perform dns lookup based on hostname,
-// returns NULL if the lookup fails.
+// Function return true iff target is a valid string representation of an IPv4 address.
+bool is_ip4(char *target);
+
+// Function return true iff target is a valid string representation of an IPv6 address.
+bool is_ip6(char *target);
+
+// Function returns time delta between initial and final in ms.
+double time_delta(struct timespec *initial, struct timespec *final);
+
+// Function to perform dns lookup on hostname or IPv4 address. Returns NULL if lookup fails.
 char *dns_lookup4(char *hostname, struct sockaddr_in *addr);
 
-// Function performs dns reverse lookup of IPv4 address.
-// returns NULL on failure.
-char *reverse_dns_lookup(char *ip);
+// Function performs dns reverse lookup of IPv4 address. Returns NULL on failure.
+char *reverse_dns_lookup4(char *ip);
 
 
 #endif //CPING_UTILS_H

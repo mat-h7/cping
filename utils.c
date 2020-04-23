@@ -1,8 +1,8 @@
 #include <netdb.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <arpa/inet.h>
 #include <string.h>
+#include <stdbool.h>
 #include "utils.h"
 
 //
@@ -26,9 +26,21 @@ uint16_t checksum(void *buffer, int bytes) {
   return (uint16_t) sum;
 }
 
+bool is_ip4(char *target) {
+  struct in_addr in_addr;
+  return inet_aton(target, &in_addr) != 0;
+}
 
-// Function to perform dns lookup based on hostname or IPv4,
-// returns NULL if the lookup fails.
+bool is_ip6(char *target) {
+  struct in6_addr in_addr;
+  return inet_pton(AF_INET6, target, (void *) &in_addr) == 1;
+}
+
+double time_delta(struct timespec *initial, struct timespec *final) {
+  return (double) (final->tv_sec - initial->tv_sec) * SECTOMILLI +
+         ((double) (final->tv_nsec - initial->tv_nsec)) / NANOTOMILLI;
+}
+
 char *dns_lookup4(char *hostname, struct sockaddr_in *addr) {
 
   struct hostent *host;
@@ -39,20 +51,17 @@ char *dns_lookup4(char *hostname, struct sockaddr_in *addr) {
   }
 
   addr->sin_family = host->h_addrtype;
-  addr->sin_addr = *(struct in_addr *) host->h_addr_list[0];
+  addr->sin_addr = *(struct in_addr *)host->h_addr;
   addr->sin_port = 0;
 
   char *ip_addr = malloc(IPV4_SIZE);
-  strcpy(ip_addr, inet_ntoa(*(struct in_addr *) host->h_addr_list[0]));
+  strcpy(ip_addr, inet_ntoa(*(struct in_addr *) host->h_addr));
 
-  //TODO: FREE
   return ip_addr;
 
 }
 
-//TODO: CHECKING AFTER MALLOC
-char *reverse_dns_lookup(char *ip) {
-
+char *reverse_dns_lookup4(char *ip) {
 
   struct in_addr in_addr;
 
@@ -76,7 +85,6 @@ char *reverse_dns_lookup(char *ip) {
   char *result = malloc((strlen(buffer) + 1));
   strcpy(result, buffer);
   return result;
-
 
 }
 
