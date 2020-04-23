@@ -9,7 +9,10 @@
 // Created by matyas on 21/04/2020.
 //
 
+#define IPV4_SIZE 4
 
+#define SECTOMILLI 1000.0
+#define NANOTOMILLI 1000000.0
 uint16_t checksum(void *buffer, int bytes) {
   uint32_t sum = 0;
   uint16_t *buff = (uint16_t *) buffer;

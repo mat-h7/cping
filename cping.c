@@ -20,6 +20,16 @@
 // Created by matyas on 21/04/2020.
 //
 
+// A few constants used by cping.
+#define DEFAULT_TTL 64
+#define TTL_MAX 255
+
+#define DEFAULT_RCVTIMEO 2
+#define DEFAULT_INTERVAL 1000
+
+#define ICMP_TYPE_EXCTTL 11
+#define ICMP_CODE_ECHOREP 0
+
 
 // Information for argument parser (argp).
 const char *argp_program_version = "cping 2.0";
@@ -223,7 +233,7 @@ int main(int argc, char **argv) {
   arguments.target = "";
   arguments.ttl = DEFAULT_TTL;
   arguments.interval = DEFAULT_INTERVAL;
-  arguments.count = INVALID;
+  arguments.count = -1;   // set count to -1 to indicate that no count was specified.
   argp_parse(&argp, argc, argv, 0, 0, &arguments);
 
   // Declare variables used to set up input to ping_loop.

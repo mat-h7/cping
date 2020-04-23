@@ -11,7 +11,7 @@ clean:
 
 cping: cping.o utils.o
 
-cping.o: utils.o global.h
-utils.o: utils.h global.h
+cping.o: utils.o
+utils.o: utils.h 
 
 
