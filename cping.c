@@ -97,8 +97,7 @@ void init_ping_packet(struct icmp_packet *packet, int sequence) {
 
 }
 
-void send_ping(int socket_fd, struct sockaddr_in *host_address, char *hostname, char *host_ip, int ttl) {
-
+void send_ping(int socket_fd, struct sockaddr *host_address, char *host_ip, int ttl) {
 
   int total_sent = 0, total_received = 0;
   long double rtt = 0, total_time = 0;
@@ -112,8 +111,12 @@ void send_ping(int socket_fd, struct sockaddr_in *host_address, char *hostname, 
   tv_out.tv_usec = 0;
   clock_gettime(CLOCK_MONOTONIC, &loop_start);
 
+  bool ipv6 = host_address->sa_family == AF_INET6;
+  if (ipv6)
+    printf("IT IS WHAT IT IS \n");
+  int level = ipv6 ? SOL_IPV6 : SOL_IP;
 
-  if (setsockopt(socket_fd, SOL_IP, IP_TTL, &ttl, sizeof(ttl))) {
+  if (setsockopt(socket_fd, level, IP_TTL, &ttl, sizeof(ttl))) {
     printf("Error! Failed to set ttl to %d.\n", ttl);
     exit(EXIT_FAILURE);
   }
@@ -122,6 +125,7 @@ void send_ping(int socket_fd, struct sockaddr_in *host_address, char *hostname, 
 
   while (loop) {
 
+    // TODO IMPLEMENT SPECIFYING INTERVAL!!
     sleep(1);
 
     // Set up ping packet.
@@ -134,8 +138,8 @@ void send_ping(int socket_fd, struct sockaddr_in *host_address, char *hostname, 
     clock_gettime(CLOCK_MONOTONIC, &intial_time);
 
     char recv_buf[sizeof(struct ip) + sizeof(struct icmp)];
-
-    if (sendto(socket_fd, &ipacket, sizeof(ipacket), 0, (struct sockaddr *) host_address, sizeof(*host_address)) <= 0) {
+    socklen_t addr_length = ipv6 ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
+    if (sendto(socket_fd, &ipacket, sizeof(ipacket), 0, (struct sockaddr *) host_address, addr_length) <= 0) {
       printf("Failed to send packet!\n");
       continue;
     }
@@ -156,7 +160,7 @@ void send_ping(int socket_fd, struct sockaddr_in *host_address, char *hostname, 
       }
 
       // If here response successfully received.
-      printf("%ld bytes from %s (%s) icmp_seq=%d:", bytes_received, hostname, host_ip, total_sent);
+      printf("%ld bytes from %s icmp_seq=%d:", bytes_received, host_ip, total_sent);
       if (icmp->icmp_type == 11) {
         // If here TTL exceeded.
         printf("Time to live exceeded\n");
@@ -192,7 +196,7 @@ bool is_ip4(char *target) {
 // Function return true iff target is a valid string representation of an IPv6 address.
 bool is_ip6(char *target) {
   struct in6_addr in_addr;
-  return inet_pton(AF_INET6, target, (void *)&in_addr) == 1;
+  return inet_pton(AF_INET6, target, (void *) &in_addr) == 1;
 }
 
 int main(int argc, char **argv) {
@@ -203,47 +207,83 @@ int main(int argc, char **argv) {
   arguments.ttl = TTL_DEFAULT;
   argp_parse(&argp, argc, argv, 0, 0, &arguments);
 
+  uint8_t ttl = arguments.ttl;
   char *target = arguments.target;
   char *ip = NULL;
   char *hostname = NULL;
-  struct sockaddr_in addr;
 
-  // Target specified is either an ip address or a hostname.
-  if (is_ip6(target)) {
-    ip = target;
-  } else if (is_ip4(target)) {
-    ip = target;
-    if ((hostname = reverse_dns_lookup(AF_INET, ip)) == NULL) {
-      printf("Error! Reverse DNS lookup for ip %s failed!\n", ip);
-      exit(EXIT_FAILURE);
-    }
-    if ((ip = dns_lookup(hostname, &addr)) == NULL) {
+  bool ipv6 = is_ip6(target);
+
+  // If target specified is a hostname or an ipv4 address, set up addr.
+  struct sockaddr addr;
+  if (!ipv6) {
+    if ((ip = dns_lookup4(target, (struct sockaddr_in*)&addr)) == NULL) {
       printf("Error! DNS lookup for hostname %s failed!\n", hostname);
       exit(EXIT_FAILURE);
     }
   } else {
-    hostname = target;
-    if ((ip = dns_lookup(hostname, &addr)) == NULL) {
-      printf("Error! DNS lookup for hostname %s failed!\n", hostname);
-      exit(EXIT_FAILURE);
-    }
+    ip = target;
+    struct sockaddr_in6 *in_addr = (struct sockaddr_in6*)&addr;
+    in_addr->sin6_family = AF_INET6;
+    in_addr->sin6_port = 0;
+    inet_pton(AF_INET6, target, &in_addr->sin6_addr);
   }
 
-  uint8_t ttl = arguments.ttl;
-
-  printf("Attempting to connect to host: %s ip: %s\n", hostname, ip);
-
   int socket_fd;
-  if ((socket_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) < 0) {
+  int af = ipv6 ? AF_INET6 : AF_INET;
+  int protocol = ipv6 ? IPPROTO_ICMPV6 : IPPROTO_ICMP;
+
+  if ((socket_fd = socket(af, SOCK_RAW, protocol)) < 0) {
     printf("Error! Failed to create socket, make sure you are running the program as root!\n");
     exit(EXIT_FAILURE);
   }
 
   signal(SIGINT, intHandler);
 
-  send_ping(socket_fd, &addr, hostname, ip, ttl);
+  send_ping(socket_fd, &addr, ip, ttl);
 
   exit(EXIT_SUCCESS);
+  /*if (!ipv6){
+    struct sockaddr_in in_addr;
+    if ((ip = dns_lookup4(target, &in_addr)) == NULL) {
+      printf("Error! DNS lookup for hostname %s failed!\n", hostname);
+      exit(EXIT_FAILURE);
+    }
+
+    int socket_fd;
+
+    if ((socket_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) < 0) {
+      printf("Error! Failed to create socket, make sure you are running the program as root!\n");
+      exit(EXIT_FAILURE);
+    }
+
+    signal(SIGINT, intHandler);
+
+    send_ping(socket_fd, (struct sockaddr*)&in_addr, ip, ttl);
+  } else {
+    printf("what the yolk\n");
+    struct sockaddr_in6 addr;
+    struct in6_addr in_addr;
+    inet_pton(AF_INET6, target, (void *) &in_addr);
+    addr.sin6_family = AF_INET6;
+    inet_pton(AF_INET6, "fd00::7b81:c6f4:4f3b:8bf0", &addr.sin6_addr);
+    addr.sin6_port = htons(0);
+
+    int socket_fd;
+    if ((socket_fd = socket(AF_INET6, SOCK_RAW, IPPROTO_ICMPV6)) < 0) {
+      printf("Error! Failed to create socket, make sure you are running the program as root!\n");
+      exit(EXIT_FAILURE);
+    }
+
+    send_ping(socket_fd, (struct sockaddr*)&addr, target, ttl);
+  }
+
+
+  printf("Attempting to connect to %s\n", ip);
+
+
+
+  exit(EXIT_SUCCESS);*/
 
 }
 
